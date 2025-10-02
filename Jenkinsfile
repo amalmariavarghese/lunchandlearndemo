@@ -4,7 +4,7 @@ pipeline {
   environment {
     // ====== CHANGE THESE ======
     ACR_LOGIN_SERVER = 'lunchandlearndemo.azurecr.io'  // e.g., lunchandlearnacr.azurecr.io
-    ACR_REPO         = 'LunchandlearnDemo'       // repo name inside ACR
+    ACR_REPO         = 'lunchandlearnDemo'       // repo name inside ACR
     WEBAPP_NAME      = 'LunchandlearnDemo'       // App Service name
     IMAGE_TAG        = "${env.BUILD_NUMBER}"     // immutable tag
     // ==========================
@@ -12,7 +12,8 @@ pipeline {
     // Kudu SCM endpoint
     KUDU_BASE = "https://${WEBAPP_NAME}.scm.azurewebsites.net"
   }
-tools { nodejs "Node18" }
+tools { 
+    nodejs "Node18" }
   stages {
     stage('Checkout') {
       steps { checkout scm }
