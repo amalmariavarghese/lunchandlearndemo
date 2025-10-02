@@ -1,10 +1,7 @@
 {
-  "name": "jenkins-azure-demo",
+  "name": "helloworld-node",
   "version": "1.0.0",
-  "private": true,
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node -e \"process.exit(0)\""
-  },
-  "dependencies": {}
+    "start": "node server.js"
+  }
 }
