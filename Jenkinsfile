@@ -12,7 +12,7 @@ pipeline {
     // Kudu SCM endpoint
     KUDU_BASE = "https://${WEBAPP_NAME}.scm.azurewebsites.net"
   }
-
+tools { nodejs "Node18" }
   stages {
     stage('Checkout') {
       steps { checkout scm }
