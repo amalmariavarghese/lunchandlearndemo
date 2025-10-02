@@ -1,93 +1,77 @@
-
 pipeline {
   agent any
 
   environment {
-    // Change these to your values
-    AZ_SUBSCRIPTION = 'YOUR_SUBSCRIPTION_ID'
-    AZ_RESOURCE_GROUP = 'rg-jenkins-demo'
-    WEBAPP_NAME = 'jenkins-demo-web'
-    ACR_NAME = 'mydemoacr'                     // without .azurecr.io
-    IMAGE_NAME = 'jenkins-azure-demo'
-    IMAGE_TAG = "${env.BUILD_NUMBER}"
-    ACR_LOGIN_SERVER = "${ACR_NAME}.azurecr.io"
+    // ====== CHANGE THESE ======
+    ACR_LOGIN_SERVER = 'lunchandlearndemo.azurecr.io'  // e.g., lunchandlearnacr.azurecr.io
+    ACR_REPO         = 'LunchandlearnDemo'       // repo name inside ACR
+    WEBAPP_NAME      = 'LunchandlearnDemo'       // App Service name
+    IMAGE_TAG        = "${env.BUILD_NUMBER}"     // immutable tag
+    // ==========================
+
+    // Kudu SCM endpoint
+    KUDU_BASE = "https://${WEBAPP_NAME}.scm.azurewebsites.net"
   }
 
   stages {
     stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Build Image') {
       steps {
-        checkout scm
+        sh """
+          docker build -t ${ACR_LOGIN_SERVER}/${ACR_REPO}:${IMAGE_TAG} .
+          docker tag  ${ACR_LOGIN_SERVER}/${ACR_REPO}:${IMAGE_TAG} ${ACR_LOGIN_SERVER}/${ACR_REPO}:latest
+        """
       }
     }
 
-    stage('Install Node & Test') {
+    stage('Push to ACR (Admin Credentials)') {
       steps {
-        sh '''
-          node -v || curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs
-          npm ci
-          npm test
-        '''
+        withCredentials([usernamePassword(credentialsId: 'az_admin_user', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+          sh """
+            echo "$ACR_PASS" | docker login ${ACR_LOGIN_SERVER} -u "$ACR_USER" --password-stdin
+            docker push ${ACR_LOGIN_SERVER}/${ACR_REPO}:${IMAGE_TAG}
+            docker push ${ACR_LOGIN_SERVER}/${ACR_REPO}:latest
+            docker logout ${ACR_LOGIN_SERVER}
+          """
+        }
       }
     }
 
-    stage('Build Docker Image') {
+    stage('Deploy (Restart Web App via Kudu)') {
       steps {
-        sh '''
-          docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} .
-        '''
-      }
-    }
-
-    stage('Azure Login') {
-      steps {
-        withCredentials([
-          usernamePassword(credentialsId: 'AZURE_SP_APPID', usernameVariable: 'AZ_APPID', passwordVariable: 'AZ_PASSWORD'),
-          string(credentialsId: 'AZURE_TENANT_ID', variable: 'AZ_TENANT')
-        ]) {
+        // Publish Profile XML from the Web App (store as secret text)
+        withCredentials([string(credentialsId: 'WEBAPP_PUBLISH_PROFILE_XML', variable: 'PUBLISH_XML')]) {
           sh '''
-            # Install Azure CLI if not present
-            az version || (curl -sL https://aka.ms/InstallAzureCLIDeb | bash)
-            az login --service-principal -u "$AZ_APPID" -p "$AZ_PASSWORD" --tenant "$AZ_TENANT"
-            az account set --subscription "${AZ_SUBSCRIPTION}"
+            # Extract Kudu Basic Auth creds from publish profile
+            # We grab the first profile (works for typical single-site publish profile)
+            KUDU_USER=$(echo "$PUBLISH_XML" | sed -n 's/.*userName="\\([^"]*\\)".*/\\1/p' | head -n1)
+            KUDU_PASS=$(echo "$PUBLISH_XML" | sed -n 's/.*userPWD="\\([^"]*\\)".*/\\1/p'   | head -n1)
+
+            # Restart site -> App Service re-pulls :latest from ACR
+            curl -sS -X POST -u "$KUDU_USER:$KUDU_PASS" \
+                 -H "Content-Length: 0" \
+                 "${KUDU_BASE}/api/app/restart" -i
           '''
         }
       }
     }
 
-    stage('Push to ACR') {
+    stage('Smoke Test') {
       steps {
-        sh '''
-          az acr login --name ${ACR_NAME}
-          docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}
-        '''
-      }
-    }
-
-    stage('Deploy to Azure Web App for Containers') {
-      steps {
-        sh '''
-          az webapp config container set \
-            --name ${WEBAPP_NAME} \
-            --resource-group ${AZ_RESOURCE_GROUP} \
-            --docker-custom-image-name ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} \
-            --docker-registry-server-url https://${ACR_LOGIN_SERVER}
-
-          # Optionally, set startup command or env vars
-          # az webapp config appsettings set --name ${WEBAPP_NAME} --resource-group ${AZ_RESOURCE_GROUP} --settings WEBSITES_PORT=3000
-
-          # Restart to pick up new container config
-          az webapp restart --name ${WEBAPP_NAME} --resource-group ${AZ_RESOURCE_GROUP}
-        '''
+        sh "sleep 10 && curl -sSf https://${WEBAPP_NAME}.azurewebsites.net | head -n 5"
       }
     }
   }
 
   post {
     success {
-      echo "Deployed ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} to ${WEBAPP_NAME}"
+      echo "Pushed ${ACR_LOGIN_SERVER}/${ACR_REPO}:${IMAGE_TAG} and restarted ${WEBAPP_NAME}."
     }
     failure {
-      echo "Build failed. Check stage logs."
+      echo "Pipeline failed. Check the stage logs above."
     }
   }
 }
