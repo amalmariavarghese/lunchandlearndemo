@@ -4,7 +4,7 @@ pipeline {
   environment {
     // ====== CHANGE THESE ======
     ACR_LOGIN_SERVER = 'lunchandlearndemo.azurecr.io'  // e.g., lunchandlearnacr.azurecr.io
-    ACR_REPO         = 'lunchandlearnDemo'       // repo name inside ACR
+    ACR_REPO         = 'lunchandlearndemo'       // repo name inside ACR
     WEBAPP_NAME      = 'LunchandlearnDemo'       // App Service name
     IMAGE_TAG        = "${env.BUILD_NUMBER}"     // immutable tag
     // ==========================
